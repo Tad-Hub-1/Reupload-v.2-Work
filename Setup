@@ -2,4 +2,10 @@ pip install requests
 
 pip install flask requests
 
+pip install colorama
+
+----------------------------------
+
+pip install flask requests colorama
+
 https://create.roblox.com/dashboard/credentials
