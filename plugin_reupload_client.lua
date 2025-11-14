@@ -1,10 +1,9 @@
 -- plugin_reupload_client.lua
--- Run in Studio (CommandBar or plugin). Requires HttpService enabled for Studio.
+-- (อัปเดต: เพิ่ม Checkbox)
 local HttpService = game:GetService("HttpService")
-local SelectionService = game:GetService("Selection") -- for plugin environment, or just workspace scanning
+local SelectionService = game:GetService("Selection")
 local Players = game:GetService("Players")
 
--- Simple UI using ScreenGui (works as LocalScript / CommandBar; in plugin you can create DockWidget)
 local function create(class, props)
 	local o = Instance.new(class)
 	if props then
@@ -15,9 +14,7 @@ local function create(class, props)
 	return o
 end
 
--- parent: if plugin environment supports CoreGui protection, choose accordingly; otherwise PlayerGui
 local parent = game:GetService("CoreGui")
--- create UI
 local gui = create("ScreenGui", {Name = "ReuploaderPluginUI", Parent = parent, ResetOnSpawn = false})
 local main = create("Frame", {Parent = gui, Size = UDim2.new(0,420,0,320), Position = UDim2.new(0.3,0,0.2,0), BackgroundColor3 = Color3.fromRGB(30,30,32)})
 create("UICorner", {Parent = main, CornerRadius = UDim.new(0,8)})
@@ -27,7 +24,6 @@ local title = create("TextLabel", {Parent = main, Text = "Reuploader Plugin UI",
 local tabAnim = create("TextButton", {Parent = main, Text = "Animation", Size = UDim2.new(0.48, -6, 0, 30), Position = UDim2.new(0.02,0,0,42)})
 local tabSound = create("TextButton", {Parent = main, Text = "Sound", Size = UDim2.new(0.48, -6, 0, 30), Position = UDim2.new(0.5,6,0,42)})
 local currentTab = "Animation"
-
 tabAnim.MouseButton1Click:Connect(function() currentTab = "Animation"; tabAnim.BackgroundColor3 = Color3.fromRGB(70,70,72); tabSound.BackgroundColor3 = Color3.fromRGB(45,45,47) end)
 tabSound.MouseButton1Click:Connect(function() currentTab = "Sound"; tabSound.BackgroundColor3 = Color3.fromRGB(70,70,72); tabAnim.BackgroundColor3 = Color3.fromRGB(45,45,47) end)
 tabAnim.BackgroundColor3 = Color3.fromRGB(70,70,72)
@@ -38,6 +34,19 @@ local scanBtn = create("TextButton", {Parent = main, Text = "Scan", Size = UDim2
 local startBtn = create("TextButton", {Parent = main, Text = "Start", Size = UDim2.new(0.48,0,0,28), Position = UDim2.new(0.02,0,0,122), BackgroundColor3 = Color3.fromRGB(60,120,60)})
 local statusLabel = create("TextLabel", {Parent = main, Text = "Status: Idle", Size = UDim2.new(1,0,0,24), Position = UDim2.new(0,0,0,160), BackgroundTransparency = 1, TextColor3 = Color3.new(1,1,1)})
 
+-- =================================================================
+-- [NEW] เพิ่ม Checkbox
+-- =================================================================
+local checkExistingBox = create("CheckBox", {
+	Parent = main,
+	Text = "ตรวจสอบของเก่า (ช้า)",
+	TextColor3 = Color3.new(1,1,1),
+	Size = UDim2.new(0.48, 0, 0, 28),
+	Position = UDim2.new(0.5, 6, 0, 122),
+	Checked = false -- ค่าเริ่มต้นคือ 'ปิด' (เพื่อความเร็ว)
+})
+-- =================================================================
+
 -- list frame
 local listFrame = create("ScrollingFrame", {Parent = main, Size = UDim2.new(1,-20,0,120), Position = UDim2.new(0,10,0,190), BackgroundColor3 = Color3.fromRGB(20,20,22)})
 local uiList = create("UIListLayout", {Parent = listFrame, Padding = UDim.new(0,4)})
@@ -47,7 +56,6 @@ local collected = {}  -- { {instance=Instance, oldId=number, name=string, type="
 
 local function stripAssetId(str)
 	if not str then return nil end
-	-- e.g. "rbxassetid://12345678" or "rbxasset://textures/whatever"
 	local num = tostring(str):match("(%d+)")
 	if num then return tonumber(num) end
 	return nil
@@ -55,7 +63,6 @@ end
 
 local function scanWorkspaceFor(tab)
 	collected = {}
-	-- search Workspace and descendants (and also ServerStorage/ReplicatedStorage if needed)
 	local containers = {workspace, game:GetService("ReplicatedStorage"), game:GetService("ServerStorage")}
 	for _, root in ipairs(containers) do
 		for _, inst in ipairs(root:GetDescendants()) do
@@ -74,7 +81,6 @@ local function scanWorkspaceFor(tab)
 	end
 	
 	statusLabel.Text = "Status: Found " .. tostring(#collected) .. " items."
-	-- show preview first 30
 	for _,c in ipairs(listFrame:GetChildren()) do
 		if c:IsA("TextLabel") then c:Destroy() end
 	end
@@ -90,16 +96,17 @@ end)
 
 
 -- =================================================================
--- [NEW] ฟังก์ชันสำหรับส่งทีละรายการ
+-- [MODIFIED] แก้ไขฟังก์ชันส่งข้อมูลให้รวมค่า Checkbox ไปด้วย
 -- =================================================================
-local function sendSingleToServer(port, item)
+local function sendSingleToServer(port, item, checkExisting)
 	local url = ("http://127.0.0.1:%s/api/reupload_single"):format(tostring(port))
 	
-	-- สร้าง payload เฉพาะข้อมูลที่จำเป็น (ไม่ส่ง 'instance')
+	-- สร้าง payload
 	local payload = {
 		oldId = item.oldId,
 		name = item.name,
-		type = item.type
+		type = item.type,
+		check_existing = checkExisting -- [NEW] ส่งค่า Checkbox ไปด้วย
 	}
 	local body = HttpService:JSONEncode(payload)
 	
@@ -123,9 +130,7 @@ local function sendSingleToServer(port, item)
 	return decoded, nil
 end
 
--- =================================================================
--- [NEW] ฟังก์ชันสำหรับอัปเดตทีละรายการ
--- =================================================================
+-- ฟังก์ชันอัปเดต (เหมือนเดิม)
 local function applySingleResult(result)
 	local oldId = result.oldId
 	local newId = result.newId
@@ -136,11 +141,9 @@ local function applySingleResult(result)
 		return
 	end
 	
-	-- ค้นหา instance ที่ตรงกันในตาราง 'collected'
 	local foundInstance = nil
 	for _, ent in ipairs(collected) do
 		if ent.oldId == oldId then
-			-- เจอแล้ว, ทำการอัปเดต
 			pcall(function()
 				if ent.type == "Animation" and ent.instance and ent.instance:IsA("Animation") then
 					ent.instance.AnimationId = "rbxassetid://" .. tostring(newId)
@@ -151,22 +154,24 @@ local function applySingleResult(result)
 				end
 			end)
 			if foundInstance then
-				break -- หยุดค้นหา
+				break
 			end
 		end
 	end
 	
-	if foundInstance then
+	-- [MODIFIED] แสดงข้อความ "Skipped" ถ้า Server แจ้งมา
+	if result.skipped then
+		statusLabel.Text = string.format("Skipped (found): %s (%d -> %d)", foundInstance.Name, oldId, newId)
+	elseif foundInstance then
 		statusLabel.Text = string.format("Updated: %s (%d -> %d)", foundInstance.Name, oldId, newId)
 	else
-		-- สิ่งนี้ไม่ควรเกิดขึ้นถ้าการสแกนถูกต้อง
 		statusLabel.Text = string.format("Completed %d -> %d (Instance not found?)", oldId, newId)
 	end
 end
 
 
 -- =================================================================
--- [REPLACED] แก้ไข Logic การทำงานของปุ่ม Start
+-- [MODIFIED] แก้ไขปุ่ม Start ให้อ่านค่า Checkbox
 -- =================================================================
 startBtn.MouseButton1Click:Connect(function()
 	local port = tonumber(portBox.Text)
@@ -180,28 +185,28 @@ startBtn.MouseButton1Click:Connect(function()
 		return
 	end
 
-	-- ปิดปุ่มเพื่อป้องกันการกดซ้ำ
+	-- [NEW] อ่านค่าจาก Checkbox
+	local shouldCheckExisting = checkExistingBox.Checked
+
 	startBtn.Text = "Running..."
 	startBtn.Enabled = false
+	checkExistingBox.Enabled = false -- ปิด Checkbox ระหว่างทำงาน
 
-	-- รันใน Thread ใหม่ (coroutine) เพื่อไม่ให้ UI ค้าง
 	task.spawn(function()
 		local successCount = 0
 		local failCount = 0
 		
-		-- วน Loop ทีละรายการในตารางที่สแกนมา
 		for i, item in ipairs(collected) do
 			statusLabel.Text = string.format("Processing %d/%d... (%s)", i, #collected, item.name)
 			
-			-- 1. ส่ง Request ไปที่ Server
-			local result, err = sendSingleToServer(port, item)
+			-- 1. ส่ง Request ไปที่ Server (พร้อมค่า Checkbox)
+			local result, err = sendSingleToServer(port, item, shouldCheckExisting)
 			
 			if not result then
-				-- ถ้า Server มีปัญหา
 				statusLabel.Text = string.format("Error on %d: %s", item.oldId, tostring(err))
 				failCount = failCount + 1
 			else
-				-- 2. Server ตอบกลับมา, ทำการอัปเดต ID
+				-- 2. อัปเดต ID
 				applySingleResult(result)
 				
 				if result.status == "ok" then
@@ -211,14 +216,14 @@ startBtn.MouseButton1Click:Connect(function()
 				end
 			end
 			
-			-- 3. หน่วงเวลาก่อนส่งรายการถัดไป (ป้องกัน Rate Limit)
-			task.wait(0.5) 
+			-- 3. หน่วงเวลา (คุณสามารถลด 0.2 นี้ได้ถ้าอยากให้เร็วกว่านี้)
+			task.wait(0.2) 
 		end
 		
-		-- Loop จบแล้ว
 		statusLabel.Text = string.format("Status: Completed. %d successful, %d failed.", successCount, failCount)
 		startBtn.Text = "Start"
 		startBtn.Enabled = true
+		checkExistingBox.Enabled = true -- เปิด Checkbox กลับมา
 	end)
 end)
 
