@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 reupload_server_full.py (with credential verification)
+(อัปเดต: รองรับ check_existing flag)
 """
 
 import os, sys, json, random, time, mimetypes
@@ -19,7 +20,6 @@ except Exception:
     print("Requests required. Install: pip install requests")
     sys.exit(1)
 
-# สลับ __file__ เป็น 'file' เพื่อให้เข้ากับโค้ดเดิมของคุณ
 BASE_DIR = Path(__file__).parent if '__file__' in locals() else Path.cwd()
 CFG_PATH = BASE_DIR / "reupload_server_config.json"
 
@@ -28,17 +28,15 @@ DEFAULT_CFG = {
     "roblosecurity": None,
     "x_api_key": None,
     "port": None,
-    "user_id": None, # [NEW] เพิ่ม field สำหรับเก็บ User ID
+    "user_id": None, 
     "download_endpoint": "https://apis.roblox.com/asset-delivery-api/v1/assetId/{assetId}",
     "download_fallback": "https://assetdelivery.roblox.com/v1/asset/?id={assetId}",
     "upload_endpoint": "https://apis.roblox.com/assets/v1/assets"
 }
 
 # === โหลด config ===
-
 if CFG_PATH.exists():
     cfg = json.loads(CFG_PATH.read_text(encoding="utf-8"))
-    # ตรวจสอบว่ามี key ใหม่หรือยัง
     if "user_id" not in cfg:
         cfg["user_id"] = None
 else:
@@ -47,7 +45,6 @@ else:
     print("[INFO] Created config template at", CFG_PATH)
 
 # === สร้าง headers ===
-
 def build_headers():
     headers = {"User-Agent": "AssetReuploaderServer/1.0"}
     if cfg.get("auth_method") == "x_api_key" and cfg.get("x_api_key"):
@@ -57,14 +54,12 @@ def build_headers():
     return headers
 
 # === ตรวจสอบ Credential ===
-
 def verify_auth():
     headers = build_headers()
     print("[INFO] Checking authentication validity...")
 
     try:  
         if cfg["auth_method"] == "roblosecurity":  
-            # [MODIFIED] แก้ไขให้ดึง User ID ด้วย
             r = requests.get("https://users.roblox.com/v1/users/authenticated", headers=headers, timeout=10)  
             if r.status_code == 200:
                 user_json = r.json()
@@ -73,15 +68,14 @@ def verify_auth():
                 if not user_id:
                     print(f"[ERR] .ROBLOSECURITY valid, but could not retrieve user ID.")
                     return False
-                cfg['user_id'] = user_id # เก็บ User ID ไว้ใน config
+                cfg['user_id'] = user_id 
                 print(f"[OK] .ROBLOSECURITY valid ✅ (Logged in as {user}, ID: {user_id})")  
                 return True  
             else:  
                 print(f"[ERR] Invalid .ROBLOSECURITY cookie ❌ (HTTP {r.status_code})")  
                 return False  
-
         elif cfg["auth_method"] == "x_api_key":  
-            cfg['user_id'] = None # x-api-key ไม่สามารถใช้ user_id ได้
+            cfg['user_id'] = None 
             r = requests.get("https://apis.roblox.com/cloud/v2/universes", headers=headers, timeout=10)  
             if r.status_code in (200, 403, 404):
                 print(f"[OK] x-api-key appears valid ✅ (HTTP {r.status_code})")  
@@ -97,7 +91,6 @@ def verify_auth():
         return False
 
 # === Setup ===
-# (ฟังก์ชัน cli_setup() ไม่มีการเปลี่ยนแปลง... สามารถใช้โค้ดเดิมได้)
 def cli_setup():
     print("=== Reupload Server Setup ===")
     print("Choose auth method:")
@@ -107,7 +100,6 @@ def cli_setup():
         choice = input("Choice (1/2): ").strip()
         if choice in ("1", "2"):
             break
-
     if choice == "1":  
         cfg["auth_method"] = "roblosecurity"  
         val = input("Enter .ROBLOSECURITY cookie: ").strip()  
@@ -116,19 +108,16 @@ def cli_setup():
         cfg["auth_method"] = "x_api_key"  
         val = input("Enter x-api-key (OpenCloud): ").strip()  
         cfg["x_api_key"] = val  
-
     suggested = random.randint(20000, 40000)  
     p = input(f"Enter port to run server on (or press Enter to use {suggested}): ").strip()  
     try:  
         cfg["port"] = int(p) if p else suggested  
     except:  
         cfg["port"] = suggested  
-
     print("\n[STEP] Verifying credentials...")  
     if not verify_auth():  
         print("[FATAL] Authentication failed. Please check your .ROBLOSECURITY or x-api-key.")  
         sys.exit(1)  
-
     CFG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")  
     print(f"\n[INFO] Auth verified successfully ✅")  
     print(f"[INFO] Config saved at {CFG_PATH}")  
@@ -136,7 +125,6 @@ def cli_setup():
 
 
 # === ตัวช่วยอื่น ===
-
 def guess_mime(filename):
     t,_ = mimetypes.guess_type(filename)
     return t or "application/octet-stream"
@@ -159,7 +147,6 @@ def download_asset(asset_id):
 def upload_asset(file_bytes, filename, displayName, assetType):
     url = cfg["upload_endpoint"]
     headers = build_headers()
-    # [CONFIRMED] ใช้ description format ตามที่ผู้ใช้ต้องการ
     request_payload = {
         "assetType": assetType,
         "displayName": displayName,
@@ -176,86 +163,64 @@ def upload_asset(file_bytes, filename, displayName, assetType):
     return True, r.json()
 
 # === Process ===
-
-## ----------------------------------------------------------------
-## [NEW] ฟังก์ชันสำหรับค้นหา Asset ที่มีอยู่
-## ----------------------------------------------------------------
 def find_existing_asset(displayName, assetType):
-    """
-    ค้นหาคลังของผู้ใช้เพื่อหา Asset ที่มีชื่อและ Description ตรงกัน
-    ทำงานเฉพาะเมื่อใช้ .ROBLOSECURITY เท่านั้น
-    """
     if cfg.get("auth_method") != "roblosecurity" or not cfg.get("user_id"):
-        if cfg.get("auth_method") == "x_api_key":
-            # แจ้งเตือนแค่ครั้งแรกๆ (ถ้าจำเป็น) แต่การข้ามไปเงียบๆ ดีกว่า
-            pass # print("[INFO] Asset check skipped (only supported for .ROBLOSECURITY auth).")
         return False, None
-
-    # print(f"[INFO] Checking inventory for existing asset named: {displayName}")
-    
     userId = cfg["user_id"]
     headers = build_headers()
     cursor = ""
-    # ใช้ API ค้นหาคลัง (Creations)
     url_template = f"https://economy.roblox.com/v2/users/{userId}/assets/creations?assetTypes={assetType}&limit=100"
     
-    while True: # วน Loop สำหรับ Pagination
+    while True: 
         url = url_template
         if cursor:
             url += f"&cursor={cursor}"
-        
         try:
             r = requests.get(url, headers=headers, timeout=10)
             if r.status_code != 200:
                 print(f"[WARN] Inventory check failed (HTTP {r.status_code}). Skipping check.")
                 return False, None
-            
             data = r.json()
-            
             if not data.get("data"):
-                return False, None # ไม่เจอ
-
+                return False, None 
             for item in data["data"]:
-                # 1. เช็คชื่อ
                 if item.get("name") == displayName:
-                    # 2. เช็ค Description
                     description = item.get("description", "")
-                    # [IMPORTANT] เราเช็คว่า "ขึ้นต้นด้วย" ไม่ใช่ "ตรงกันเป๊ะ"
-                    # เพราะเวลาที่ reupload จะไม่ตรงกัน
                     if description.startswith("Reuploaded at "): 
                         asset_id = item.get("assetId")
                         if asset_id:
                             print(f"[OK] Found matching asset: {displayName} -> {asset_id}")
                             return True, asset_id
-            
             cursor = data.get("nextPageCursor")
             if not cursor:
-                break # นี่คือหน้าสุดท้าย
-                
+                break 
         except Exception as e:
             print(f"[WARN] Inventory check error: {e}. Skipping check.")
             return False, None
-    
-    # วนครบทุกหน้าแล้ว ไม่เจอ
     return False, None
 
 ## ----------------------------------------------------------------
-## [MODIFIED] แก้ไข process_single ให้เช็คก่อน
+## [MODIFIED] แก้ไข process_single ให้เช็ค flag "check_existing"
 ## ----------------------------------------------------------------
 def process_single(item):
     oldId = item.get("oldId")
     name = item.get("name", f"item_{oldId}")
     assetType = item.get("type", "Animation")
     
+    # [NEW] อ่านค่า "check_existing" จาก item (payload)
+    # ถ้าไม่ส่งมา (ค่าเริ่มต้น) = False (ไม่เช็ค)
+    check_existing = item.get("check_existing", False) 
+    
     # ----------------------------------------------------------------
-    # [NEW] ตรวจสอบว่ามี Asset นี้อยู่แล้วหรือยัง
+    # [NEW] จะค้นหา ก็ต่อเมื่อ check_existing เป็น True เท่านั้น
     # ----------------------------------------------------------------
-    found, existing_id = find_existing_asset(name, assetType)
-    if found:
-        print(f"[SKIP] Using existing asset {existing_id} for {name}.")
-        # ส่ง ID ที่หาเจอ กลับไปแทน ID ที่อัปโหลดใหม่
-        return {"oldId": oldId, "newId": existing_id, "status": "ok", "name": name, "skipped": True}
+    if check_existing:
+        found, existing_id = find_existing_asset(name, assetType)
+        if found:
+            print(f"[SKIP] Using existing asset {existing_id} for {name}.")
+            return {"oldId": oldId, "newId": existing_id, "status": "ok", "name": name, "skipped": True}
     # ----------------------------------------------------------------
+    # ถ้า check_existing=False หรือหาไม่เจอ ก็จะมาทำงานส่วนนี้ต่อ
 
     print(f"[+] Processing (New Upload) {oldId} -> {name} (Type: {assetType})")
     
@@ -297,9 +262,11 @@ def api_reupload_single():
     if not payload or "oldId" not in payload:
         return jsonify({"error": "Invalid payload, missing oldId"}), 400
     
+    # 'payload' คือ 'item' ซึ่งตอนนี้จะมี "check_existing" อยู่ข้างใน
     result = process_single(payload)
     return jsonify(result)
 
+# (Endpoint อื่นๆ เหมือนเดิม)
 @app.route("/api/reupload_list", methods=["POST"])
 def api_reupload_list():
     payload = request.get_json(force=True, silent=True)
@@ -312,7 +279,6 @@ def ping():
     return jsonify({"pong": True})
 
 # === Main ===
-
 if __name__ == "__main__":
     cli_setup()
     port = int(cfg.get("port", 9229))
