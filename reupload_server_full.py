@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 reupload_server_full.py (with credential verification)
-(อัปเดต: รองรับ check_existing flag)
+(อัปเดต: เพิ่มการพิมพ์สีเขียว)
 """
 
 import os, sys, json, random, time, mimetypes
@@ -20,6 +20,21 @@ except Exception:
     print("Requests required. Install: pip install requests")
     sys.exit(1)
 
+# =================================================================
+# [NEW] 1. เพิ่มการ Import และรัน colorama
+# =================================================================
+try:
+    import colorama
+    from colorama import Fore, Style
+    colorama.init(autoreset=True) # <-- ทำให้สีกลับมาเป็นปกติอัตโนมัติ
+except Exception:
+    print("Colorama is recommended for colored output: pip install colorama")
+    # สร้าง Class ปลอมไว้ ถ้าหากไม่ได้ติดตั้ง colorama
+    class DummyFore: __getattr__ = lambda self, name: ""
+    Fore = DummyFore()
+# =================================================================
+
+
 BASE_DIR = Path(__file__).parent if '__file__' in locals() else Path.cwd()
 CFG_PATH = BASE_DIR / "reupload_server_config.json"
 
@@ -33,6 +48,9 @@ DEFAULT_CFG = {
     "download_fallback": "https://assetdelivery.roblox.com/v1/asset/?id={assetId}",
     "upload_endpoint": "https://apis.roblox.com/assets/v1/assets"
 }
+
+# (โค้ดส่วน โหลด config, สร้าง headers, verify_auth, cli_setup, 
+#  guess_mime, download_asset, upload_asset... ทั้งหมดเหมือนเดิม)
 
 # === โหลด config ===
 if CFG_PATH.exists():
@@ -163,6 +181,28 @@ def upload_asset(file_bytes, filename, displayName, assetType):
     return True, r.json()
 
 # === Process ===
+
+# =================================================================
+# [NEW] 2. สร้างฟังก์ชันพิมพ์ข้อความสีเขียว
+# =================================================================
+def print_success_location(newId):
+    """
+    พิมพ์ข้อความสีเขียว พร้อมลิงก์ที่ถูกต้องตาม auth_method
+    """
+    dashboard_url = ""
+    if cfg.get("auth_method") == "roblosecurity":
+        # ถ้าใช้ Cookie, มันจะไปที่ "My Creations"
+        dashboard_url = f"https://create.roblox.com/dashboard/creations/configure?id={newId}"
+    else:
+        # ถ้าใช้ API Key, มันจะไปที่ "Group Creations"
+        # เราไม่รู้ Group ID, แต่เราลิงก์ไปที่หน้า Asset ตรงๆ ได้
+        dashboard_url = f"https://www.roblox.com/library/{newId}/"
+    
+    # พิมพ์ข้อความสีเขียว
+    print(Fore.GREEN + f"    -> Asset is ready. Configure it at: {dashboard_url}")
+# =================================================================
+
+
 def find_existing_asset(displayName, assetType):
     if cfg.get("auth_method") != "roblosecurity" or not cfg.get("user_id"):
         return False, None
@@ -199,28 +239,22 @@ def find_existing_asset(displayName, assetType):
             return False, None
     return False, None
 
-## ----------------------------------------------------------------
-## [MODIFIED] แก้ไข process_single ให้เช็ค flag "check_existing"
-## ----------------------------------------------------------------
+
 def process_single(item):
     oldId = item.get("oldId")
     name = item.get("name", f"item_{oldId}")
     assetType = item.get("type", "Animation")
-    
-    # [NEW] อ่านค่า "check_existing" จาก item (payload)
-    # ถ้าไม่ส่งมา (ค่าเริ่มต้น) = False (ไม่เช็ค)
     check_existing = item.get("check_existing", False) 
     
-    # ----------------------------------------------------------------
-    # [NEW] จะค้นหา ก็ต่อเมื่อ check_existing เป็น True เท่านั้น
-    # ----------------------------------------------------------------
     if check_existing:
         found, existing_id = find_existing_asset(name, assetType)
         if found:
             print(f"[SKIP] Using existing asset {existing_id} for {name}.")
+            # =================================================================
+            # [NEW] 3. เรียกใช้ฟังก์ชันพิมพ์สีเขียว (จุดที่ 1: ตอน Skip)
+            # =================================================================
+            print_success_location(existing_id)
             return {"oldId": oldId, "newId": existing_id, "status": "ok", "name": name, "skipped": True}
-    # ----------------------------------------------------------------
-    # ถ้า check_existing=False หรือหาไม่เจอ ก็จะมาทำงานส่วนนี้ต่อ
 
     print(f"[+] Processing (New Upload) {oldId} -> {name} (Type: {assetType})")
     
@@ -241,6 +275,10 @@ def process_single(item):
         return {"oldId": oldId, "status": "upload_failed", "error": "No assetId in response", "name": name}
 
     print(f"[OK] Reupload success: {oldId} -> {newId}")
+    # =================================================================
+    # [NEW] 3. เรียกใช้ฟังก์ชันพิมพ์สีเขียว (จุดที่ 2: ตอน Upload สำเร็จ)
+    # =================================================================
+    print_success_location(newId)
     return {"oldId": oldId, "newId": newId, "status": "ok", "name": name}
 
 
@@ -252,7 +290,7 @@ def process_list(items):
         time.sleep(0.3) 
     return results
 
-# === Flask server ===
+# === Flask server === (เหมือนเดิม)
 
 app = Flask("asset_reupload_server")
 
@@ -262,11 +300,9 @@ def api_reupload_single():
     if not payload or "oldId" not in payload:
         return jsonify({"error": "Invalid payload, missing oldId"}), 400
     
-    # 'payload' คือ 'item' ซึ่งตอนนี้จะมี "check_existing" อยู่ข้างใน
     result = process_single(payload)
     return jsonify(result)
 
-# (Endpoint อื่นๆ เหมือนเดิม)
 @app.route("/api/reupload_list", methods=["POST"])
 def api_reupload_list():
     payload = request.get_json(force=True, silent=True)
@@ -278,7 +314,7 @@ def api_reupload_list():
 def ping():
     return jsonify({"pong": True})
 
-# === Main ===
+# === Main === (เหมือนเดิม)
 if __name__ == "__main__":
     cli_setup()
     port = int(cfg.get("port", 9229))
