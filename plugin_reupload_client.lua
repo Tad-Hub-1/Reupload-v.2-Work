@@ -1,5 +1,5 @@
 -- plugin_reupload_client.lua
--- (อัปเดต: เพิ่ม Checkbox)
+-- (อัปเดต: แก้ไข CheckBox -> TextCheckBox)
 local HttpService = game:GetService("HttpService")
 local SelectionService = game:GetService("Selection")
 local Players = game:GetService("Players")
@@ -35,9 +35,9 @@ local startBtn = create("TextButton", {Parent = main, Text = "Start", Size = UDi
 local statusLabel = create("TextLabel", {Parent = main, Text = "Status: Idle", Size = UDim2.new(1,0,0,24), Position = UDim2.new(0,0,0,160), BackgroundTransparency = 1, TextColor3 = Color3.new(1,1,1)})
 
 -- =================================================================
--- [NEW] เพิ่ม Checkbox
+-- [FIXED] แก้ไข CheckBox เป็น TextCheckBox
 -- =================================================================
-local checkExistingBox = create("CheckBox", {
+local checkExistingBox = create("TextCheckBox", {
 	Parent = main,
 	Text = "ตรวจสอบของเก่า (ช้า)",
 	TextColor3 = Color3.new(1,1,1),
@@ -95,18 +95,14 @@ scanBtn.MouseButton1Click:Connect(function()
 end)
 
 
--- =================================================================
--- [MODIFIED] แก้ไขฟังก์ชันส่งข้อมูลให้รวมค่า Checkbox ไปด้วย
--- =================================================================
 local function sendSingleToServer(port, item, checkExisting)
 	local url = ("http://127.0.0.1:%s/api/reupload_single"):format(tostring(port))
 	
-	-- สร้าง payload
 	local payload = {
 		oldId = item.oldId,
 		name = item.name,
 		type = item.type,
-		check_existing = checkExisting -- [NEW] ส่งค่า Checkbox ไปด้วย
+		check_existing = checkExisting 
 	}
 	local body = HttpService:JSONEncode(payload)
 	
@@ -130,7 +126,6 @@ local function sendSingleToServer(port, item, checkExisting)
 	return decoded, nil
 end
 
--- ฟังก์ชันอัปเดต (เหมือนเดิม)
 local function applySingleResult(result)
 	local oldId = result.oldId
 	local newId = result.newId
@@ -159,7 +154,6 @@ local function applySingleResult(result)
 		end
 	end
 	
-	-- [MODIFIED] แสดงข้อความ "Skipped" ถ้า Server แจ้งมา
 	if result.skipped then
 		statusLabel.Text = string.format("Skipped (found): %s (%d -> %d)", foundInstance.Name, oldId, newId)
 	elseif foundInstance then
@@ -169,10 +163,6 @@ local function applySingleResult(result)
 	end
 end
 
-
--- =================================================================
--- [MODIFIED] แก้ไขปุ่ม Start ให้อ่านค่า Checkbox
--- =================================================================
 startBtn.MouseButton1Click:Connect(function()
 	local port = tonumber(portBox.Text)
 	if not port then
@@ -185,12 +175,11 @@ startBtn.MouseButton1Click:Connect(function()
 		return
 	end
 
-	-- [NEW] อ่านค่าจาก Checkbox
 	local shouldCheckExisting = checkExistingBox.Checked
 
 	startBtn.Text = "Running..."
 	startBtn.Enabled = false
-	checkExistingBox.Enabled = false -- ปิด Checkbox ระหว่างทำงาน
+	checkExistingBox.Enabled = false
 
 	task.spawn(function()
 		local successCount = 0
@@ -199,14 +188,12 @@ startBtn.MouseButton1Click:Connect(function()
 		for i, item in ipairs(collected) do
 			statusLabel.Text = string.format("Processing %d/%d... (%s)", i, #collected, item.name)
 			
-			-- 1. ส่ง Request ไปที่ Server (พร้อมค่า Checkbox)
 			local result, err = sendSingleToServer(port, item, shouldCheckExisting)
 			
 			if not result then
 				statusLabel.Text = string.format("Error on %d: %s", item.oldId, tostring(err))
 				failCount = failCount + 1
 			else
-				-- 2. อัปเดต ID
 				applySingleResult(result)
 				
 				if result.status == "ok" then
@@ -216,14 +203,13 @@ startBtn.MouseButton1Click:Connect(function()
 				end
 			end
 			
-			-- 3. หน่วงเวลา (คุณสามารถลด 0.2 นี้ได้ถ้าอยากให้เร็วกว่านี้)
 			task.wait(0.2) 
 		end
 		
 		statusLabel.Text = string.format("Status: Completed. %d successful, %d failed.", successCount, failCount)
 		startBtn.Text = "Start"
 		startBtn.Enabled = true
-		checkExistingBox.Enabled = true -- เปิด Checkbox กลับมา
+		checkExistingBox.Enabled = true
 	end)
 end)
 
