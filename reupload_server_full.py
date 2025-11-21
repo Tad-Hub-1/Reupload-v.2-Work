@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-reupload_server_full.py (with credential verification)
-(อัปเดต: เพิ่มการพิมพ์สีเขียว)
+reupload_server_full.py (with auto-fix config)
 """
 
 import os, sys, json, random, time, mimetypes
@@ -20,47 +19,52 @@ except Exception:
     print("Requests required. Install: pip install requests")
     sys.exit(1)
 
-# =================================================================
-# [NEW] 1. เพิ่มการ Import และรัน colorama
-# =================================================================
+# Load Colorama
 try:
     import colorama
     from colorama import Fore, Style
-    colorama.init(autoreset=True) # <-- ทำให้สีกลับมาเป็นปกติอัตโนมัติ
+    colorama.init(autoreset=True) 
 except Exception:
-    print("Colorama is recommended for colored output: pip install colorama")
-    # สร้าง Class ปลอมไว้ ถ้าหากไม่ได้ติดตั้ง colorama
     class DummyFore: __getattr__ = lambda self, name: ""
     Fore = DummyFore()
-# =================================================================
-
 
 BASE_DIR = Path(__file__).parent if '__file__' in locals() else Path.cwd()
 CFG_PATH = BASE_DIR / "reupload_server_config.json"
 
+# ค่าเริ่มต้นที่ควรจะมี
 DEFAULT_CFG = {
     "auth_method": None,
     "roblosecurity": None,
     "x_api_key": None,
     "port": None,
-    "user_id": None, 
+    "user_id": None,
     "download_endpoint": "https://apis.roblox.com/asset-delivery-api/v1/assetId/{assetId}",
     "download_fallback": "https://assetdelivery.roblox.com/v1/asset/?id={assetId}",
     "upload_endpoint": "https://apis.roblox.com/assets/v1/assets"
 }
 
-# (โค้ดส่วน โหลด config, สร้าง headers, verify_auth, cli_setup, 
-#  guess_mime, download_asset, upload_asset... ทั้งหมดเหมือนเดิม)
-
-# === โหลด config ===
+# === โหลดและซ่อมแซม Config (จุดที่แก้) ===
 if CFG_PATH.exists():
-    cfg = json.loads(CFG_PATH.read_text(encoding="utf-8"))
-    if "user_id" not in cfg:
-        cfg["user_id"] = None
+    try:
+        cfg = json.loads(CFG_PATH.read_text(encoding="utf-8"))
+    except:
+        cfg = {}
+    
+    # ตรวจสอบว่ามี key ครบไหม ถ้าขาดให้เติมจาก DEFAULT_CFG
+    modified = False
+    for key, val in DEFAULT_CFG.items():
+        if key not in cfg:
+            cfg[key] = val
+            modified = True
+            
+    if modified:
+        print(Fore.YELLOW + "[INFO] Config file was outdated. Added missing keys automatically.")
+        CFG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 else:
     cfg = DEFAULT_CFG.copy()
     CFG_PATH.write_text(json.dumps(DEFAULT_CFG, indent=2), encoding="utf-8")
     print("[INFO] Created config template at", CFG_PATH)
+
 
 # === สร้าง headers ===
 def build_headers():
@@ -87,6 +91,8 @@ def verify_auth():
                     print(f"[ERR] .ROBLOSECURITY valid, but could not retrieve user ID.")
                     return False
                 cfg['user_id'] = user_id 
+                # บันทึก user_id กลับลงไฟล์ด้วย
+                CFG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
                 print(f"[OK] .ROBLOSECURITY valid ✅ (Logged in as {user}, ID: {user_id})")  
                 return True  
             else:  
@@ -111,51 +117,65 @@ def verify_auth():
 # === Setup ===
 def cli_setup():
     print("=== Reupload Server Setup ===")
-    print("Choose auth method:")
-    print("  1) .ROBLOSECURITY cookie")
-    print("  2) x-api-key (OpenCloud)")
-    while True:
-        choice = input("Choice (1/2): ").strip()
-        if choice in ("1", "2"):
-            break
-    if choice == "1":  
-        cfg["auth_method"] = "roblosecurity"  
-        val = input("Enter .ROBLOSECURITY cookie: ").strip()  
-        cfg["roblosecurity"] = val  
-    else:  
-        cfg["auth_method"] = "x_api_key"  
-        val = input("Enter x-api-key (OpenCloud): ").strip()  
-        cfg["x_api_key"] = val  
-    suggested = random.randint(20000, 40000)  
-    p = input(f"Enter port to run server on (or press Enter to use {suggested}): ").strip()  
-    try:  
-        cfg["port"] = int(p) if p else suggested  
-    except:  
-        cfg["port"] = suggested  
+    # ถ้ามีข้อมูลอยู่แล้ว ไม่ต้องถามซ้ำก็ได้ แต่เพื่อความชัวร์ให้เลือกใหม่ถ้ารันตรงๆ
+    # หรือข้ามถ้ามีข้อมูลแล้ว (ในที่นี้ขอคงเดิมไว้)
+    if cfg.get("auth_method") and (cfg.get("roblosecurity") or cfg.get("x_api_key")):
+        print(f"Loaded existing config ({cfg['auth_method']}).")
+        # ถาม Port ถ้ายังไม่มี
+        if not cfg.get("port"):
+             suggested = random.randint(20000, 40000)
+             p = input(f"Enter port to run server on (or press Enter to use {suggested}): ").strip()
+             cfg["port"] = int(p) if p else suggested
+    else:
+        print("Choose auth method:")
+        print("  1) .ROBLOSECURITY cookie")
+        print("  2) x-api-key (OpenCloud)")
+        while True:
+            choice = input("Choice (1/2): ").strip()
+            if choice in ("1", "2"):
+                break
+        if choice == "1":  
+            cfg["auth_method"] = "roblosecurity"  
+            val = input("Enter .ROBLOSECURITY cookie: ").strip()  
+            cfg["roblosecurity"] = val  
+        else:  
+            cfg["auth_method"] = "x_api_key"  
+            val = input("Enter x-api-key (OpenCloud): ").strip()  
+            cfg["x_api_key"] = val  
+        
+        suggested = random.randint(20000, 40000)  
+        p = input(f"Enter port to run server on (or press Enter to use {suggested}): ").strip()  
+        try:  
+            cfg["port"] = int(p) if p else suggested  
+        except:  
+            cfg["port"] = suggested  
+
     print("\n[STEP] Verifying credentials...")  
     if not verify_auth():  
         print("[FATAL] Authentication failed. Please check your .ROBLOSECURITY or x-api-key.")  
         sys.exit(1)  
+    
     CFG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")  
     print(f"\n[INFO] Auth verified successfully ✅")  
-    print(f"[INFO] Config saved at {CFG_PATH}")  
     print(f"[INFO] Server will listen on http://localhost:{cfg['port']}\n")
 
 
-# === ตัวช่วยอื่น ===
+# === Helper Functions ===
 def guess_mime(filename):
     t,_ = mimetypes.guess_type(filename)
     return t or "application/octet-stream"
 
 def download_asset(asset_id):
-    url = cfg["download_endpoint"].format(assetId=asset_id)
+    # ตรวจสอบอีกครั้งว่ามี key หรือไม่ (กันพลาด)
+    endpoint = cfg.get("download_endpoint", "https://apis.roblox.com/asset-delivery-api/v1/assetId/{assetId}")
+    url = endpoint.format(assetId=asset_id)
     headers = build_headers()
     try:
         r = requests.get(url, headers=headers, timeout=15)
     except Exception as e:
         return False, f"Download error: {e}"
     if r.status_code >= 400:
-        fb = cfg["download_fallback"].format(assetId=asset_id)
+        fb = cfg.get("download_fallback", "https://assetdelivery.roblox.com/v1/asset/?id={assetId}").format(assetId=asset_id)
         r2 = requests.get(fb, headers=headers, timeout=10)
         if r2.status_code >= 400:
             return False, f"Download failed {r.status_code} + fallback {r2.status_code}"
@@ -163,7 +183,7 @@ def download_asset(asset_id):
     return True, {"bytes": r.content, "filename": f"asset_{asset_id}.rbxm"}
 
 def upload_asset(file_bytes, filename, displayName, assetType):
-    url = cfg["upload_endpoint"]
+    url = cfg.get("upload_endpoint", "https://apis.roblox.com/assets/v1/assets")
     headers = build_headers()
     request_payload = {
         "assetType": assetType,
@@ -180,28 +200,13 @@ def upload_asset(file_bytes, filename, displayName, assetType):
         return False, f"Upload failed {r.status_code}: {r.text[:300]}"
     return True, r.json()
 
-# === Process ===
-
-# =================================================================
-# [NEW] 2. สร้างฟังก์ชันพิมพ์ข้อความสีเขียว
-# =================================================================
 def print_success_location(newId):
-    """
-    พิมพ์ข้อความสีเขียว พร้อมลิงก์ที่ถูกต้องตาม auth_method
-    """
     dashboard_url = ""
     if cfg.get("auth_method") == "roblosecurity":
-        # ถ้าใช้ Cookie, มันจะไปที่ "My Creations"
         dashboard_url = f"https://create.roblox.com/dashboard/creations/configure?id={newId}"
     else:
-        # ถ้าใช้ API Key, มันจะไปที่ "Group Creations"
-        # เราไม่รู้ Group ID, แต่เราลิงก์ไปที่หน้า Asset ตรงๆ ได้
         dashboard_url = f"https://www.roblox.com/library/{newId}/"
-    
-    # พิมพ์ข้อความสีเขียว
     print(Fore.GREEN + f"    -> Asset is ready. Configure it at: {dashboard_url}")
-# =================================================================
-
 
 def find_existing_asset(displayName, assetType):
     if cfg.get("auth_method") != "roblosecurity" or not cfg.get("user_id"):
@@ -239,7 +244,6 @@ def find_existing_asset(displayName, assetType):
             return False, None
     return False, None
 
-
 def process_single(item):
     oldId = item.get("oldId")
     name = item.get("name", f"item_{oldId}")
@@ -250,9 +254,6 @@ def process_single(item):
         found, existing_id = find_existing_asset(name, assetType)
         if found:
             print(f"[SKIP] Using existing asset {existing_id} for {name}.")
-            # =================================================================
-            # [NEW] 3. เรียกใช้ฟังก์ชันพิมพ์สีเขียว (จุดที่ 1: ตอน Skip)
-            # =================================================================
             print_success_location(existing_id)
             return {"oldId": oldId, "newId": existing_id, "status": "ok", "name": name, "skipped": True}
 
@@ -275,46 +276,25 @@ def process_single(item):
         return {"oldId": oldId, "status": "upload_failed", "error": "No assetId in response", "name": name}
 
     print(f"[OK] Reupload success: {oldId} -> {newId}")
-    # =================================================================
-    # [NEW] 3. เรียกใช้ฟังก์ชันพิมพ์สีเขียว (จุดที่ 2: ตอน Upload สำเร็จ)
-    # =================================================================
     print_success_location(newId)
     return {"oldId": oldId, "newId": newId, "status": "ok", "name": name}
 
 
-def process_list(items):
-    results = []
-    for idx, item in enumerate(items):
-        result = process_single(item)
-        results.append(result)
-        time.sleep(0.3) 
-    return results
-
-# === Flask server === (เหมือนเดิม)
-
+# === Flask server ===
 app = Flask("asset_reupload_server")
 
 @app.route("/api/reupload_single", methods=["POST"])
 def api_reupload_single():
     payload = request.get_json(force=True, silent=True)
     if not payload or "oldId" not in payload:
-        return jsonify({"error": "Invalid payload, missing oldId"}), 400
-    
+        return jsonify({"error": "Invalid payload"}), 400
     result = process_single(payload)
     return jsonify(result)
-
-@app.route("/api/reupload_list", methods=["POST"])
-def api_reupload_list():
-    payload = request.get_json(force=True, silent=True)
-    if not payload or "items" not in payload:
-        return jsonify({"error": "Invalid payload"}), 400
-    return jsonify({"results": process_list(payload["items"])})
 
 @app.route("/api/ping")
 def ping():
     return jsonify({"pong": True})
 
-# === Main === (เหมือนเดิม)
 if __name__ == "__main__":
     cli_setup()
     port = int(cfg.get("port", 9229))
