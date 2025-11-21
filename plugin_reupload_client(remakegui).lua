@@ -1,5 +1,5 @@
 -- plugin_reupload_client.lua
--- (FIXED: Custom Checkbox + Modern UI)
+-- (FIXED: Removed .Enabled on Buttons + Modern UI)
 
 local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
@@ -65,7 +65,6 @@ end
 -- GUI Creation
 -- =================================================================
 local parent = game:GetService("CoreGui")
--- Clean up old GUI if exists (to prevent duplicates during testing)
 pcall(function() parent.ReuploaderPluginModernUI:Destroy() end)
 
 local gui = create("ScreenGui", {Name = "ReuploaderPluginModernUI", Parent = parent, ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling})
@@ -86,7 +85,7 @@ local titleBar = create("Frame", {
 	Name = "TitleBar", Parent = mainGui, Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = Theme.TitleBg, BorderSizePixel = 0
 })
 create("UICorner", {Parent = titleBar, CornerRadius = UDim.new(0, 10)})
-create("Frame", {Parent = titleBar, Size = UDim2.new(1, 0, 0, 10), Position = UDim2.new(0, 0, 1, -10), BackgroundColor3 = Theme.TitleBg, BorderSizePixel = 0}) -- Cover bottom corners
+create("Frame", {Parent = titleBar, Size = UDim2.new(1, 0, 0, 10), Position = UDim2.new(0, 0, 1, -10), BackgroundColor3 = Theme.TitleBg, BorderSizePixel = 0})
 create("TextLabel", {
 	Parent = titleBar, Text = "  Asset Reuploader Tool", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, 
 	TextColor3 = Theme.TextWhite, Font = Enum.Font.SourceSansBold, TextSize = 20, TextXAlignment = Enum.TextXAlignment.Left
@@ -133,8 +132,8 @@ local scanBtn = create("TextButton", {
 })
 create("UICorner", {Parent = scanBtn, CornerRadius = UDim.new(0,6)})
 
--- 3. Checkbox (Custom Built) - [FIXED HERE]
-local optionsGroup = create("TextButton", { -- Make the whole row clickable
+-- 3. Checkbox (Custom Built)
+local optionsGroup = create("TextButton", {
 	Parent = contentContainer, Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, LayoutOrder = 3, Text = ""
 })
 local checkIconBg = create("Frame", {
@@ -145,7 +144,7 @@ local checkMark = create("TextLabel", {
 	Parent = checkIconBg, Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1, Text = "✓", TextColor3 = Theme.AccentGreen, 
 	TextSize = 18, Font = Enum.Font.SourceSansBold, Visible = false
 })
-local checkLabel = create("TextLabel", {
+create("TextLabel", {
 	Parent = optionsGroup, Text = "Check existing assets (Slower but safer)", Size = UDim2.new(1, -30, 1, 0), Position = UDim2.new(0, 34, 0, 0),
 	BackgroundTransparency = 1, TextColor3 = Theme.TextWhite, Font = Enum.Font.SourceSans, TextSize = 15, TextXAlignment = Enum.TextXAlignment.Left
 })
@@ -286,7 +285,16 @@ startBtn.MouseButton1Click:Connect(function()
 	if not port then statusLabel.Text = "Invalid Port"; statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100); return end
 	if #collected == 0 then statusLabel.Text = "Scan first!"; statusLabel.TextColor3 = Color3.fromRGB(255, 255, 100); return end
 	
-	startBtn.Text = "Running..."; startBtn.Enabled = false; optionsGroup.Active = false; scanBtn.Enabled = false
+	-- [FIXED] ใช้ .Active = false และ .AutoButtonColor = false แทน .Enabled
+	startBtn.Text = "Running..."
+	startBtn.Active = false
+	startBtn.AutoButtonColor = false
+	
+	optionsGroup.Active = false
+	optionsGroup.AutoButtonColor = false
+	
+	scanBtn.Active = false
+	scanBtn.AutoButtonColor = false
 	
 	task.spawn(function()
 		local success, fail = 0, 0
@@ -297,7 +305,17 @@ startBtn.MouseButton1Click:Connect(function()
 			task.wait(0.2)
 		end
 		statusLabel.Text = string.format("Done! Success: %d, Failed: %d", success, fail)
-		startBtn.Text = "Start Reupload Process"; startBtn.Enabled = true; optionsGroup.Active = true; scanBtn.Enabled = true
+		
+		-- [FIXED] เปิดใช้งานปุ่มอีกครั้ง
+		startBtn.Text = "Start Reupload Process"
+		startBtn.Active = true
+		startBtn.AutoButtonColor = true
+		
+		optionsGroup.Active = true
+		optionsGroup.AutoButtonColor = true
+		
+		scanBtn.Active = true
+		scanBtn.AutoButtonColor = true
 	end)
 end)
 
